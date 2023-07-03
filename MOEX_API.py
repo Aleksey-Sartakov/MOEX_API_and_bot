@@ -63,3 +63,7 @@ class MoexSession:
     def get_share_info_in_date_interval(self, share_name, start_date, end_date, data_type="xml", metadata="off", engine_name="stock", market_name="shares", broad_id="TQBR"):
         self.last_query = f"https://iss.moex.com/iss/history/engines/{engine_name}/markets/{market_name}/boards/{broad_id}/securities/{share_name}.{data_type}?iss.meta={metadata}&from={start_date}&till={end_date}"
         return self.session.get(self.last_query, verify=True).text
+
+    def get_actual_share_info(self, share_name, data_type="xml", metadata="off", engine_name="stock", market_name="shares", broad_id="TQBR"):
+        self.last_query = f"https://iss.moex.com/iss/engines/{engine_name}/markets/{market_name}/boards/{broad_id}/securities/{share_name}.{data_type}?iss.meta={metadata}"
+        return self.session.get(self.last_query, verify=True).text

@@ -1,11 +1,12 @@
 from MOEX_API import MoexSession
 from lxml import objectify, etree
 from datetime import timedelta, date
+from threading import Timer
+from time import sleep
 import pandas as pd
 import numpy as np
 import json
 import tabulate
-
 
 LOGIN = "sartakov.aleksey.d@gmail.com"
 PASSWORD = "Sfadnca05"
@@ -15,13 +16,13 @@ MARKET_NAME = "shares"
 START_TIME_INTERVAL_DELTA = timedelta(days=31)
 END_TIME_INTERVAL_DELTA = timedelta(days=1)
 TRADING_SESSION_NAME = "main"
-"/iss/history/engines/[engine]/markets/[market]/sessions/[session]/securities/[security]"
-"/iss/engines/[engine]/markets/[market]/securities/[security]"
+GROWTH_RATE = 3
 
 
 def convert_source_data_to_python_xml(source_xml):
     end_od_encoding_declaration = source_xml.find("\n") + 1
     source_xml = source_xml[end_od_encoding_declaration:]
+    # print(source_xml)
     xml = objectify.fromstring(source_xml)
     return xml
 
@@ -92,10 +93,104 @@ def get_all_market_info():
     print_xml_in_tables_form(xml)
 
 
-def get_all_ru_stocks_info():
+def get_all_ru_shares_info():
     stocks = session.get_shares_by_broad()
     xml = convert_source_data_to_python_xml(stocks)
     print_xml_in_tables_form(xml)
+
+
+def get_all_ru_shares_id():
+    stocks = session.get_shares_by_broad()
+    xml = convert_source_data_to_python_xml(stocks)
+    shares_id = {}
+    for data in xml.getchildren():
+        if data.get("id") == "marketdata":
+            data_info = data.rows.getchildren()
+            for row in data_info:
+                if row.get("SECID") is not None and float(row.get("VALUE")) != 0:
+                    shares_id[row.get("SECID")] = {"detected": 0}
+            break
+    return shares_id
+
+
+def get_shares_average_and_last_day_trading_volumes(shares):
+    current_date = date.today()
+    start_date = current_date - START_TIME_INTERVAL_DELTA
+    end_date = current_date - END_TIME_INTERVAL_DELTA
+
+    for share in shares.keys():
+        last_month_share_info = session.get_share_info_in_date_interval(share, start_date, end_date)
+        xml = convert_source_data_to_python_xml(last_month_share_info)
+        days = xml.data.rows.getchildren()
+        num_of_days = len(days)
+        total_trading_volume = 0
+        for day in days:
+            total_trading_volume += int(float(day.get("VALUE")))
+
+        last_day_trading_volume = int(float(days[-1].get("VALUE")))
+        average_trading_volume = total_trading_volume // num_of_days
+        shares[share]["average_trading_volume"] = average_trading_volume
+        shares[share]["last_day_trading_volume"] = last_day_trading_volume
+
+
+def get_actual_share_data(share):
+    actual_share_data = session.get_actual_share_info(share)
+    xml = convert_source_data_to_python_xml(actual_share_data)
+    for data in xml.getchildren():
+        if data.get("id") == "marketdata":
+            share_info = data.rows.getchildren()[0]
+
+            opening_price = float(share_info.get("OPEN"))
+            last_price = float(share_info.get("LAST"))
+            trend = last_price / opening_price
+            current_trading_volume = int(share_info.get("VALTODAY"))
+            update_time = share_info.get("UPDATETIME")
+
+            return [trend, current_trading_volume, last_price, update_time]
+
+
+def find_necessary_shares(shares):
+    for share in shares.keys():
+        trend, current_trading_volume, last_price, update_time = get_actual_share_data(share)
+        print(f"share: {share},   current: {current_trading_volume},   last day: {shares[share]['last_day_trading_volume']}")
+        if (trend > 1 and
+            current_trading_volume >= shares[share]["average_trading_volume"] * GROWTH_RATE and
+            current_trading_volume >= shares[share]["last_day_trading_volume"] * GROWTH_RATE and
+            shares[share]["detected"] == 0
+        ):
+            with open("necessary_shares.txt", "a+") as file:
+                file.write(f"{share}: {{last_price: {last_price}, current_trading_volume: {current_trading_volume}, update_time: {update_time}}}\n")
+
+
+class RepeatedTimer(object):
+    def __init__(self, interval, function, *args, **kwargs):
+        self._timer = None
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs
+        self.is_running = False
+        self.start()
+
+    def _run(self):
+        self.is_running = False
+        self.start()
+        self.function(*self.args, **self.kwargs)
+
+    def start(self):
+        if not self.is_running:
+            self._timer = Timer(self.interval, self._run)
+            self._timer.start()
+            self.is_running = True
+
+    def stop(self):
+        self._timer.cancel()
+        self.is_running = False
+
+
+def hello(name):
+    with open("test.txt", "a+") as file:
+        file.write(f"\n===================={name}====================\n")
 
 
 if __name__ == "__main__":
@@ -109,33 +204,21 @@ if __name__ == "__main__":
         # print(session.get_markets())
 
         # get_all_market_info()
-        # print(session.get_sessions_for_shares())
-        # print(session.get_broads())
-        get_all_ru_stocks_info()
 
+        # get_all_ru_shares_info()
 
-        # current_date = datetime.today()
-        # print(session.get_share_info_in_date_interval("YNDX", start_date, end_date))
+        # print(session.get_actual_share_info("YNDX"))
 
+        current_date = date.today()
+        with open("necessary_shares.txt", "a+") as file:
+            file.write(f"\n===================={current_date}====================\n")
 
-        # current_date = date(2023, 4, 10)
-        # start_date = current_date - START_TIME_INTERVAL_DELTA
-        # end_date = current_date - END_TIME_INTERVAL_DELTA
-        # print(current_date)
-        # print(start_date)
-        # print(end_date)
-        # print()
-        # last_month_share_info = session.get_share_info_in_date_interval("YNDX", start_date, end_date)
-        # xml = convert_source_data_to_python_xml(last_month_share_info)
-        # num_of_days = len(xml.data.rows.getchildren())
-        # total_trading_volume = 0
-        # for day in xml.data.rows.getchildren():
-        #     total_trading_volume += int(float(day.get("VALUE")))
-        #
-        # average_value = total_trading_volume // num_of_days
-        # pretty_average_value = ""
-        # while average_value % 1000 > 0:
-        #     pretty_average_value += str(average_value % 1000)[::-1] + " "
-        #     average_value = average_value // 1000
-        # pretty_average_value = pretty_average_value[::-1].strip()
-        # print(f"average trading volume value:   {pretty_average_value}")
+        shares = get_all_ru_shares_id()
+        get_shares_average_and_last_day_trading_volumes(shares)
+
+        # find_necessary_shares(shares)
+        repeated_timer = RepeatedTimer(1800, find_necessary_shares, shares)
+        # try:
+        #     sleep(5)
+        # finally:
+        #     repeated_timer.stop()
