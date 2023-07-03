@@ -100,14 +100,14 @@ def get_all_ru_shares_info():
 
 
 def get_all_ru_shares_id():
-    stocks = session.get_shares_by_broad()
-    xml = convert_source_data_to_python_xml(stocks)
+    shares = session.get_shares_by_broad()
+    xml = convert_source_data_to_python_xml(shares)
     shares_id = {}
     for data in xml.getchildren():
         if data.get("id") == "marketdata":
             data_info = data.rows.getchildren()
             for row in data_info:
-                if row.get("SECID") is not None and float(row.get("VALUE")) != 0:
+                if row.get("SECID") is not None:
                     shares_id[row.get("SECID")] = {"detected": 0}
             break
     return shares_id
@@ -118,12 +118,27 @@ def get_shares_average_and_last_day_trading_volumes(shares):
     start_date = current_date - START_TIME_INTERVAL_DELTA
     end_date = current_date - END_TIME_INTERVAL_DELTA
 
+    shares_to_delete = []
+    for share in shares.keys():
+        last_month_share_info = session.get_share_info_in_date_interval(share, start_date, end_date)
+        xml = convert_source_data_to_python_xml(last_month_share_info)
+        days = xml.data.rows.getchildren()
+        num_of_days = len(days)
+
+        if num_of_days == 0:
+            shares_to_delete.append(share)
+        elif days[-1].get("VALUE") == "0":
+            shares_to_delete.append(share)
+    for share in shares_to_delete:
+        del shares[share]
+
     for share in shares.keys():
         last_month_share_info = session.get_share_info_in_date_interval(share, start_date, end_date)
         xml = convert_source_data_to_python_xml(last_month_share_info)
         days = xml.data.rows.getchildren()
         num_of_days = len(days)
         total_trading_volume = 0
+
         for day in days:
             total_trading_volume += int(float(day.get("VALUE")))
 
@@ -131,6 +146,7 @@ def get_shares_average_and_last_day_trading_volumes(shares):
         average_trading_volume = total_trading_volume // num_of_days
         shares[share]["average_trading_volume"] = average_trading_volume
         shares[share]["last_day_trading_volume"] = last_day_trading_volume
+
 
 
 def get_actual_share_data(share):
@@ -149,17 +165,19 @@ def get_actual_share_data(share):
             return [trend, current_trading_volume, last_price, update_time]
 
 
-def find_necessary_shares(shares):
+def find_necessary_shares(shares,found_shares):
     for share in shares.keys():
         trend, current_trading_volume, last_price, update_time = get_actual_share_data(share)
-        print(f"share: {share},   current: {current_trading_volume},   last day: {shares[share]['last_day_trading_volume']}")
         if (trend > 1 and
             current_trading_volume >= shares[share]["average_trading_volume"] * GROWTH_RATE and
             current_trading_volume >= shares[share]["last_day_trading_volume"] * GROWTH_RATE and
-            shares[share]["detected"] == 0
+            shares[share]["detected"] == 0 and
+            share not in found_shares
         ):
+            found_shares.append(share)
+            print(f"share: {share},   current: {current_trading_volume},   last day: {shares[share]['last_day_trading_volume']},   average trading volume: {shares[share]['average_trading_volume']},   update_time: {update_time}")
             with open("necessary_shares.txt", "a+") as file:
-                file.write(f"{share}: {{last_price: {last_price}, current_trading_volume: {current_trading_volume}, update_time: {update_time}}}\n")
+                file.write(f"{share}: {{last_price: {last_price}, current_trading_volume: {current_trading_volume},   average trading volume: {shares[share]['average_trading_volume']},   update_time: {update_time}}}\n")
 
 
 class RepeatedTimer(object):
@@ -214,10 +232,11 @@ if __name__ == "__main__":
             file.write(f"\n===================={current_date}====================\n")
 
         shares = get_all_ru_shares_id()
+        found_shares = []
         get_shares_average_and_last_day_trading_volumes(shares)
 
-        # find_necessary_shares(shares)
-        repeated_timer = RepeatedTimer(1800, find_necessary_shares, shares)
+        find_necessary_shares(shares, found_shares)
+        repeated_timer = RepeatedTimer(1800, find_necessary_shares, shares, found_shares)
         # try:
         #     sleep(5)
         # finally:
