@@ -156,10 +156,15 @@ def get_actual_share_data(share):
         if data.get("id") == "marketdata":
             share_info = data.rows.getchildren()[0]
 
-            opening_price = float(share_info.get("OPEN"))
-            last_price = float(share_info.get("LAST"))
-            trend = last_price / opening_price
-            current_trading_volume = int(share_info.get("VALTODAY"))
+            try:
+                opening_price = float(share_info.get("OPEN"))
+                last_price = float(share_info.get("LAST"))
+                current_trading_volume = int(share_info.get("VALTODAY"))
+                trend = last_price / opening_price
+            except ValueError:
+                last_price = 0.0
+                current_trading_volume = 0
+                trend = 0
             update_time = share_info.get("UPDATETIME")
 
             return [trend, current_trading_volume, last_price, update_time]
